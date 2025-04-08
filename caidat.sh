@@ -96,11 +96,34 @@ cat << EOF > /etc/rc.d/rc.local
 touch /var/lock/subsys/local
 EOF
 
+# Xóa buffer đầu vào trước khi yêu cầu nhập
+stty sane
+echo "" > /dev/tty
+
 # Nhập cấu hình IPv6 từ người dùng
 echo "Nhập thông tin IPv6:" | tee -a $LOGFILE
-read -p "Nhập IPV6ADDR (ví dụ: 2001:19f0:5401:2c7::2): " IPV6ADDR
-read -p "Nhập IPV6_DEFAULTGW (ví dụ: 2001:19f0:5401:2c7::1): " IPV6_DEFAULTGW
-echo "IPV6ADDR: $IPV6ADDR, IPV6_DEFAULTGW: $IPV6_DEFAULTGW" | tee -a $LOGFILE
+
+# Nhập IPV6ADDR
+while :; do
+    read -p "Nhập IPV6ADDR (ví dụ: 2001:19f0:5401:2c7::2): " IPV6ADDR
+    if [ -n "$IPV6ADDR" ]; then
+        echo "IPV6ADDR đã nhập: $IPV6ADDR" | tee -a $LOGFILE
+        break
+    else
+        echo "Vui lòng nhập một địa chỉ IPV6ADDR hợp lệ!"
+    fi
+done
+
+# Nhập IPV6_DEFAULTGW
+while :; do
+    read -p "Nhập IPV6_DEFAULTGW (ví dụ: 2001:19f0:5401:2c7::1): " IPV6_DEFAULTGW
+    if [ -n "$IPV6_DEFAULTGW" ]; then
+        echo "IPV6_DEFAULTGW đã nhập: $IPV6_DEFAULTGW" | tee -a $LOGFILE
+        break
+    else
+        echo "Vui lòng nhập một địa chỉ IPV6_DEFAULTGW hợp lệ!"
+    fi
+done
 
 # Cấu hình IPv6
 echo "Đang cấu hình IPv6..." | tee -a $LOGFILE
