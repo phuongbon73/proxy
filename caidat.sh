@@ -7,9 +7,9 @@ echo "Bắt đầu cài đặt - $(date)" > $LOGFILE
 
 # Cập nhật kho CentOS và tắt xác thực SSL
 echo "Đang cập nhật kho CentOS..." | tee -a $LOGFILE
-sed -i s/mirror.centos.org/vault.centos.org/g /etc/yum.repos.d/*.repo
-sed -i s/^#.*baseurl=http/baseurl=http/g /etc/yum.repos.d/*.repo
-sed -i s/^mirrorlist=http/#mirrorlist=http/g /etc/yum.repos.d/*.repo
+sed -i 's/mirror.centos.org/vault.centos.org/g' /etc/yum.repos.d/*.repo
+sed -i 's/^#.*baseurl=http/baseurl=http/g' /etc/yum.repos.d/*.repo
+sed -i 's/^mirrorlist=http/#mirrorlist=http/g' /etc/yum.repos.d/*.repo
 echo "sslverify=false" >> /etc/yum.conf
 echo "Đã cập nhật kho CentOS và tắt SSL verify" | tee -a $LOGFILE
 
@@ -72,7 +72,7 @@ EOF
 
 gen_data() {
     seq $FIRST_PORT $LAST_PORT | while read port; do
-        echo "user$port/$(random)/$ICP4/$port/$(gen64 $IP6)"
+        echo "user$port/$(random)/$IP4/$port/$(gen64 $IP6)"
     done
 }
 
@@ -97,6 +97,7 @@ touch /var/lock/subsys/local
 EOF
 
 # Nhập cấu hình IPv6 từ người dùng
+echo "Nhập thông tin IPv6:" | tee -a $LOGFILE
 read -p "Nhập IPV6ADDR (ví dụ: 2001:19f0:5401:2c7::2): " IPV6ADDR
 read -p "Nhập IPV6_DEFAULTGW (ví dụ: 2001:19f0:5401:2c7::1): " IPV6_DEFAULTGW
 echo "IPV6ADDR: $IPV6ADDR, IPV6_DEFAULTGW: $IPV6_DEFAULTGW" | tee -a $LOGFILE
