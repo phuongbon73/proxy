@@ -1,11 +1,17 @@
 #!/bin/sh
 PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 
-# Update CentOS repositories and disable SSL verification
+# Đường dẫn file log
+LOGFILE="/home/cloudfly/install_log.txt"
+echo "Bắt đầu cài đặt - $(date)" > $LOGFILE
+
+# Cập nhật kho CentOS và tắt xác thực SSL
+echo "Đang cập nhật kho CentOS..." | tee -a $LOGFILE
 sed -i s/mirror.centos.org/vault.centos.org/g /etc/yum.repos.d/*.repo
 sed -i s/^#.*baseurl=http/baseurl=http/g /etc/yum.repos.d/*.repo
 sed -i s/^mirrorlist=http/#mirrorlist=http/g /etc/yum.repos.d/*.repo
 echo "sslverify=false" >> /etc/yum.conf
+echo "Đã cập nhật kho CentOS và tắt SSL verify" | tee -a $LOGFILE
 
 random() {
     tr </dev/urandom -dc A-Za-z0-9 | head -c12
@@ -21,14 +27,15 @@ gen64() {
 }
 
 install_3proxy() {
-    echo "installing 3proxy"
+    echo "Đang cài đặt 3proxy..." | tee -a $LOGFILE
     URL="https://github.com/z3APA3A/3proxy/archive/3proxy-0.8.6.tar.gz"
-    wget -qO- $URL | bsdtar -xvf-
+    wget -qO- $URL | bsdtar -xvf- >> $LOGFILE 2>&1
     cd 3proxy-3proxy-0.8.6
-    make -f Makefile.Linux
+    make -f Makefile.Linux >> $LOGFILE 2>&1
     mkdir -p /usr/local/etc/3proxy/{bin,logs,stat}
     cp src/3proxy /usr/local/etc/3proxy/bin/
     cd $WORKDIR
+    echo "Đã cài đặt 3proxy thành công" | tee -a $LOGFILE
 }
 
 gen_3proxy() {
@@ -60,11 +67,12 @@ gen_proxy_file_for_user() {
     cat >proxy.txt <<EOF
 $(awk -F "/" '{print $3 ":" $4 ":" $1 ":" $2 }' ${WORKDATA})
 EOF
+    echo "Đã tạo file proxy.txt với danh sách proxy" | tee -a $LOGFILE
 }
 
 gen_data() {
     seq $FIRST_PORT $LAST_PORT | while read port; do
-        echo "phuongbon$port/$(random)/$IP4/$port/$(gen64 $IP6)"
+        echo "user$port/$(random)/$ICP4/$port/$(gen64 $IP6)"
     done
 }
 
@@ -80,74 +88,84 @@ $(awk -F "/" '{print "ifconfig eth0 inet6 add " $5 "/64"}' ${WORKDATA})
 EOF
 }
 
-echo "installing apps"
-yum -y install wget gcc net-tools bsdtar zip >/dev/null
+echo "Đang cài đặt các ứng dụng cần thiết..." | tee -a $LOGFILE
+yum -y install wget gcc net-tools bsdtar zip >> $LOGFILE 2>&1
 
 cat << EOF > /etc/rc.d/rc.local
 #!/bin/bash
 touch /var/lock/subsys/local
 EOF
 
-# Get IPv6 configuration from user
-read -p "Enter IPV6ADDR (e.g., 2001:19f0:5401:2c7::2): " IPV6ADDR
-read -p "Enter IPV6_DEFAULTGW (e.g., 2001:19f0:5401:2c7::1): " IPV6_DEFAULTGW
+# Nhập cấu hình IPv6 từ người dùng
+read -p "Nhập IPV6ADDR (ví dụ: 2001:19f0:5401:2c7::2): " IPV6ADDR
+read -p "Nhập IPV6_DEFAULTGW (ví dụ: 2001:19f0:5401:2c7::1): " IPV6_DEFAULTGW
+echo "IPV6ADDR: $IPV6ADDR, IPV6_DEFAULTGW: $IPV6_DEFAULTGW" | tee -a $LOGFILE
 
-# Configure IPv6 settings
+# Cấu hình IPv6
+echo "Đang cấu hình IPv6..." | tee -a $LOGFILE
 cat << EOF >> /etc/sysconfig/network-scripts/ifcfg-eth0
 IPV6_FAILURE_FATAL=no
 IPV6_ADDR_GEN_MODE=stable-privacy
 IPV6ADDR=$IPV6ADDR
 IPV6_DEFAULTGW=$IPV6_DEFAULTGW
 EOF
+echo "Đã ghi cấu hình IPv6 vào ifcfg-eth0" | tee -a $LOGFILE
 
-# Restart network
-service network restart
+# Khởi động lại mạng
+echo "Đang khởi động lại mạng..." | tee -a $LOGFILE
+service network restart >> $LOGFILE 2>&1
 
-# Test IPv6 connectivity
-echo "Testing IPv6 connectivity..."
-ping6 google.com.vn -c4
+# Kiểm tra kết nối IPv6
+echo "Đang kiểm tra kết nối IPv6..." | tee -a $LOGFILE
+ping6 google.com.vn -c4 >> $LOGFILE 2>&1
 if [ $? -eq 0 ]; then
-    echo "IPv6 connectivity successful!"
+    echo "Kết nối IPv6 thành công!" | tee -a $LOGFILE
 else
-    echo "IPv6 connectivity failed. Please check your network configuration."
+    echo "Kết nối IPv6 thất bại. Vui lòng kiểm tra cấu hình mạng." | tee -a $LOGFILE
     exit 1
 fi
 
-echo "installing apps"
-yum -y install wget gcc net-tools bsdtar zip >/dev/null
+echo "Đang cài đặt lại các ứng dụng cần thiết..." | tee -a $LOGFILE
+yum -y install wget gcc net-tools bsdtar zip >> $LOGFILE 2>&1
 
 install_3proxy
 
-echo "working folder = /home/cloudfly"
+echo "Thư mục làm việc = /home/cloudfly" | tee -a $LOGFILE
 WORKDIR="/home/cloudfly"
 WORKDATA="${WORKDIR}/data.txt"
 mkdir $WORKDIR && cd $_
+echo "Đã tạo thư mục làm việc $WORKDIR" | tee -a $LOGFILE
 
 IP4=$(curl -4 -s icanhazip.com)
 IP6=$(curl -6 -s icanhazip.com | cut -f1-4 -d':')
-
-echo "Internal ip = ${IP4}. External sub for ip6 = ${IP6}"
+echo "IP nội bộ = ${IP4}. IP6 bên ngoài = ${IP6}" | tee -a $LOGFILE
 
 FIRST_PORT=21000
+MAX_PORT=61000
+MAX_PROXIES=$((MAX_PORT - FIRST_PORT + 1))
+
 while :; do
-    read -p "Enter number of proxies to create (1-40000): " PROXY_COUNT
-    [[ $PROXY_COUNT =~ ^[0-9]+$ ]] || { echo "Enter a valid number"; continue; }
-    if ((PROXY_COUNT >= 1 && PROXY_COUNT <= 40000)); then
-        echo "OK! Creating $PROXY_COUNT proxies"
+    read -p "Nhập số lượng proxy cần tạo (1-$MAX_PROXIES): " PROXY_COUNT
+    [[ $PROXY_COUNT =~ ^[0-9]+$ ]] || { echo "Vui lòng nhập số hợp lệ"; continue; }
+    if ((PROXY_COUNT >= 1 && PROXY_COUNT <= MAX_PROXIES)); then
+        echo "OK! Sẽ tạo $PROXY_COUNT proxy" | tee -a $LOGFILE
         break
     else
-        echo "Number out of range (1-40000), try again"
+        echo "Số lượng không trong khoảng (1-$MAX_PROXIES), thử lại"
     fi
 done
 
 LAST_PORT=$((FIRST_PORT + PROXY_COUNT - 1))
-echo "Starting from port $FIRST_PORT to $LAST_PORT. Continue..."
+echo "Bắt đầu từ port $FIRST_PORT đến $LAST_PORT. Tiếp tục..." | tee -a $LOGFILE
 
+echo "Đang tạo dữ liệu proxy..." | tee -a $LOGFILE
 gen_data >$WORKDIR/data.txt
 gen_iptables >$WORKDIR/boot_iptables.sh
 gen_ifconfig >$WORKDIR/boot_ifconfig.sh
 chmod +x boot_*.sh /etc/rc.local
+echo "Đã tạo file dữ liệu và script khởi động" | tee -a $LOGFILE
 
+echo "Đang tạo cấu hình 3proxy..." | tee -a $LOGFILE
 gen_3proxy >/usr/local/etc/3proxy/3proxy.cfg
 
 cat >>/etc/rc.local <<EOF
@@ -158,8 +176,10 @@ ulimit -n 1000048
 EOF
 chmod 0755 /etc/rc.local
 bash /etc/rc.local
+echo "Đã cấu hình rc.local và khởi động proxy" | tee -a $LOGFILE
 
 gen_proxy_file_for_user
 
-echo "Proxy creation complete. Proxy list saved to proxy.txt"
-echo "Starting Proxy"
+echo "Hoàn tất tạo proxy. Danh sách proxy được lưu tại proxy.txt" | tee -a $LOGFILE
+echo "Đang khởi động Proxy..." | tee -a $LOGFILE
+echo "Kết thúc cài đặt - $(date)" >> $LOGFILE
