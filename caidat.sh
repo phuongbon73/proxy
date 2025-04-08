@@ -64,7 +64,7 @@ EOF
 
 gen_data() {
     seq $FIRST_PORT $LAST_PORT | while read port; do
-        echo "user$port/$(random)/$IP4/$port/$(gen64 $IP6)"
+        echo "phuongbon$port/$(random)/$IP4/$port/$(gen64 $IP6)"
     done
 }
 
@@ -96,7 +96,7 @@ read -p "Enter IPV6_DEFAULTGW (e.g., 2001:19f0:5401:2c7::1): " IPV6_DEFAULTGW
 cat << EOF >> /etc/sysconfig/network-scripts/ifcfg-eth0
 IPV6_FAILURE_FATAL=no
 IPV6_ADDR_GEN_MODE=stable-privacy
-IPV6ADDR=$IPV6ADDR/64
+IPV6ADDR=$IPV6ADDR
 IPV6_DEFAULTGW=$IPV6_DEFAULTGW
 EOF
 
