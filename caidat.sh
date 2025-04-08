@@ -134,6 +134,8 @@ echo "Đã ghi cấu hình IPv6 vào ifcfg-eth0"
 # Khởi động lại mạng
 echo "Đang khởi động lại mạng..."
 service network restart
+echo "Đã khởi động lại mạng, chờ 5 giây để hệ thống ổn định..."
+sleep 5
 
 # Kiểm tra kết nối IPv6
 echo "Đang kiểm tra kết nối IPv6..."
