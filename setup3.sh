@@ -1,33 +1,79 @@
 #!/bin/sh
 PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 
+# Function to check command execution status
+check_status() {
+    if [ $? -ne 0 ]; then
+        echo "Error: $1"
+        exit 1
+    fi
+}
+
 # Update CentOS repository and disable SSL verification
 echo "Updating CentOS repository..."
 sed -i 's/mirror.centos.org/vault.centos.org/g' /etc/yum.repos.d/*.repo
 sed -i 's/^#.*baseurl=http/baseurl=http/g' /etc/yum.repos.d/*.repo
 sed -i 's/^mirrorlist=http/#mirrorlist=http/g' /etc/yum.repos.d/*.repo
 echo "sslverify=false" >> /etc/yum.conf
+check_status "Failed to update CentOS repository"
 echo "Updated CentOS repository and disabled SSL verification"
+
+# Install required packages
+echo "Installing necessary applications..."
+yum -y install epel-release
+check_status "Failed to install epel-release"
+yum -y install wget gcc make net-tools bsdtar zip python3
+check_status "Failed to install required packages"
+
+# Install additional dependencies for 3proxy
+echo "Installing 3proxy dependencies..."
+yum -y install glibc-devel libevent-devel
+check_status "Failed to install 3proxy dependencies"
 
 # Generate random IPv6 address within the subnet
 array=(1 2 3 4 5 6 7 8 9 0 a b c d e f)
 gen64() {
     ip64() {
-        echo "${array[$RANDOM % 16]}${array[$RANDOM % 16]}${array[$RANDOM % 16]}${array[$RANDOM % 16]}"
+        echo "${array[$RANDOM % 16]}${array[$RANDOM % 16]}${array[$RANDOM % 16]}${array[$Random % 16]}"
     }
     echo "$1:$(ip64):$(ip64):$(ip64):$(ip64)"
 }
 
-# Install 3proxy
+# Install 3proxy with error handling
 install_3proxy() {
     echo "Installing 3proxy..."
     URL="https://github.com/z3APA3A/3proxy/archive/3proxy-0.8.6.tar.gz"
-    wget -qO- $URL | bsdtar -xvf-
+    
+    # Download 3proxy
+    wget -qO- $URL -O 3proxy.tar.gz
+    check_status "Failed to download 3proxy"
+    
+    # Extract archive
+    bsdtar -xvf 3proxy.tar.gz
+    check_status "Failed to extract 3proxy archive"
+    
     cd 3proxy-3proxy-0.8.6
+    
+    # Check if Makefile.Linux exists
+    if [ ! -f Makefile.Linux ]; then
+        echo "Error: Makefile.Linux not found"
+        exit 1
+    }
+    
+    # Compile 3proxy
     make -f Makefile.Linux
+    check_status "Failed to compile 3proxy"
+    
+    # Create directories
     mkdir -p /usr/local/etc/3proxy/{bin,logs,stat}
+    check_status "Failed to create 3proxy directories"
+    
+    # Copy binary
     cp src/3proxy /usr/local/etc/3proxy/bin/
+    check_status "Failed to copy 3proxy binary"
+    
     cd $WORKDIR
+    rm -rf 3proxy-3proxy-0.8.6 3proxy.tar.gz
     echo "3proxy installed successfully"
 }
 
@@ -64,14 +110,10 @@ gen_ifconfig() {
 # Clean old IPv6 addresses
 clean_old_ips() {
     ip -6 addr flush dev eth0 scope global
-    # Re-add primary IPv6
     echo "ifconfig eth0 inet6 add $IPV6ADDR/64" > $WORKDIR/boot_ifconfig.sh
     bash $WORKDIR/boot_ifconfig.sh
+    check_status "Failed to clean old IPs"
 }
-
-# Install required packages
-echo "Installing necessary applications..."
-yum -y install wget gcc net-tools bsdtar zip python3 >/dev/null
 
 # Create rc.local if not exists
 cat << EOF > /etc/rc.d/rc.local
@@ -79,6 +121,7 @@ cat << EOF > /etc/rc.d/rc.local
 touch /var/lock/subsys/local
 EOF
 chmod +x /etc/rc.local
+check_status "Failed to create rc.local"
 
 # Clear input buffer
 stty sane
@@ -128,11 +171,13 @@ IPV6_ADDR_GEN_MODE=stable-privacy
 IPV6ADDR=$IPV6ADDR
 IPV6_DEFAULTGW=$IPV6_DEFAULTGW
 EOF
+check_status "Failed to configure IPv6"
 echo "IPv6 configuration written to ifcfg-eth0"
 
 # Restart network
 echo "Restarting network..."
 service network restart
+check_status "Failed to restart network"
 echo "Network restarted, waiting 5 seconds for stability..."
 sleep 5
 
@@ -146,19 +191,22 @@ else
     exit 1
 fi
 
-# Install 3proxy
-install_3proxy
-
 # Set up working directory
 echo "Working directory = /home/cloudfly"
 WORKDIR="/home/cloudfly"
 mkdir -p $WORKDIR && cd $_
+check_status "Failed to create working directory"
 echo "Created working directory $WORKDIR"
 
 # Get IP addresses
 IP4=$(curl -4 -s icanhazip.com)
+check_status "Failed to get IPv4 address"
 IP6_PREFIX=$(curl -6 -s icanhazip.com | cut -f1-4 -d':')
+check_status "Failed to get IPv6 prefix"
 echo "Internal IP = ${IP4}. External IPv6 prefix = ${IP6_PREFIX}"
+
+# Install 3proxy
+install_3proxy
 
 # Initialize proxy configurations
 PROXY_PORTS=()
@@ -173,12 +221,15 @@ for i in $(seq 1 $NUM_PROXIES); do
     gen_ifconfig $CURRENT_IP6 > $WORKDIR/boot_ifconfig_$PORT.sh
     chmod +x $WORKDIR/boot_ifconfig_$PORT.sh
     bash $WORKDIR/boot_ifconfig_$PORT.sh
+    check_status "Failed to apply ifconfig for port $PORT"
     
     # Generate 3proxy configuration
     gen_3proxy $PORT $CURRENT_IP6 > /usr/local/etc/3proxy/3proxy_$PORT.cfg
+    check_status "Failed to generate 3proxy config for port $PORT"
     
     # Start individual 3proxy instance
     /usr/local/etc/3proxy/bin/3proxy /usr/local/etc/3proxy/3proxy_$PORT.cfg &
+    check_status "Failed to start 3proxy for port $PORT"
     
     echo "Proxy $i running on ${IP4}:${PORT} with IPv6 ${CURRENT_IP6}"
 done
@@ -194,6 +245,7 @@ $(for port in "${PROXY_PORTS[@]}"; do
 done)
 EOF
 chmod 0755 /etc/rc.local
+check_status "Failed to update rc.local"
 
 # Create API server script
 cat > $WORKDIR/api_server.py << 'EOF'
@@ -310,9 +362,11 @@ EOF
 
 # Make API server executable
 chmod +x $WORKDIR/api_server.py
+check_status "Failed to make API server executable"
 
 # Start API server in background
 nohup python3 $WORKDIR/api_server.py &
+check_status "Failed to start API server"
 
 echo "Proxy setup complete!"
 for i in "${!PROXY_PORTS[@]}"; do
