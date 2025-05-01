@@ -66,6 +66,20 @@ gen_proxy_data() {
     done > $WORKDIR/proxy_data.txt
 }
 
+# Configure ulimit for open file descriptors
+configure_ulimit() {
+    echo "Configuring ulimit for open file descriptors..."
+    cat << EOF >> /etc/security/limits.conf
+* soft nofile 1000048
+* hard nofile 1000048
+root soft nofile 1000048
+root hard nofile 1000048
+EOF
+    echo "ulimit -n 1000048" >> /etc/profile
+    ulimit -n 1000048
+    echo "ulimit configured to 1000048"
+}
+
 # Install required packages
 echo "Installing necessary applications..."
 yum -y install wget gcc net-tools bsdtar zip python3 >/dev/null
@@ -148,6 +162,9 @@ else
     exit 1
 fi
 
+# Configure ulimit
+configure_ulimit
+
 # Install 3proxy
 install_3proxy
 
@@ -170,15 +187,16 @@ gen_3proxy > /usr/local/etc/3proxy/3proxy.cfg
 bash $WORKDIR/boot_ifconfig.sh
 echo "Applied IPv6 configurations"
 
-# Set up rc.local to start 3proxy
+# Set up rc.local to start 3proxy with ulimit
 cat >> /etc/rc.local <<EOF
-bash ${WORKDIR}/boot_ifconfig.sh
 ulimit -n 1000048
+bash ${WORKDIR}/boot_ifconfig.sh
 /usr/local/etc/3proxy/bin/3proxy /usr/local/etc/3proxy/3proxy.cfg
 EOF
 chmod 0755 /etc/rc.local
 
 # Start 3proxy
+ulimit -n 1000048
 bash /etc/rc.local
 echo "Started 3proxy"
 
@@ -265,6 +283,7 @@ def update_ifconfig():
 def restart_3proxy():
     subprocess.run(["pkill", "3proxy"])
     subprocess.run(["bash", f"{WORKDIR}/boot_ifconfig.sh"])
+    subprocess.run(["ulimit", "-n", "1000048"])
     subprocess.run(["/usr/local/etc/3proxy/bin/3proxy", "/usr/local/etc/3proxy/3proxy.cfg"])
 
 # HTTP handler
