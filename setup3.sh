@@ -283,7 +283,6 @@ def update_ifconfig():
 def restart_3proxy():
     subprocess.run(["pkill", "3proxy"])
     subprocess.run(["bash", f"{WORKDIR}/boot_ifconfig.sh"])
-    subprocess.run(["ulimit", "-n", "1000048"])
     subprocess.run(["/usr/local/etc/3proxy/bin/3proxy", "/usr/local/etc/3proxy/3proxy.cfg"])
 
 # HTTP handler
