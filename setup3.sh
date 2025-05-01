@@ -30,11 +30,18 @@ echo "Installing 3proxy dependencies..."
 yum -y install glibc-devel libevent-devel
 check_status "Failed to install 3proxy dependencies"
 
+# Set ulimit for 3proxy
+echo "Setting ulimit for 3proxy..."
+echo "* soft nofile 1000048" >> /etc/security/limits.conf
+echo "* hard nofile 1000048" >> /etc/security/limits.conf
+ulimit -n 1000048
+check_status "Failed to set ulimit"
+
 # Generate random IPv6 address within the subnet
 array=(1 2 3 4 5 6 7 8 9 0 a b c d e f)
 gen64() {
     ip64() {
-        echo "${array[$RANDOM % 16]}${array[$RANDOM % 16]}${array[$RANDOM % 16]}${array[$Random % 16]}"
+        echo "${array[$RANDOM % 16]}${array[$RANDOM % 16]}${array[$RANDOM % 16]}${array[$RANDOM % 16]}"
     }
     echo "$1:$(ip64):$(ip64):$(ip64):$(ip64)"
 }
@@ -110,7 +117,9 @@ gen_ifconfig() {
 # Clean old IPv6 addresses
 clean_old_ips() {
     ip -6 addr flush dev eth0 scope global
-    echo "ifconfig eth0 inet6 add $IPV6ADDR/64" > $WORKDIR/boot_ifconfig.sh
+    # Re-add primary IPv6
+    gen_ifconfig $IPV6ADDR > $WORKDIR/boot_ifconfig.sh
+    chmod +x $WORKDIR/boot_ifconfig.sh
     bash $WORKDIR/boot_ifconfig.sh
     check_status "Failed to clean old IPs"
 }
@@ -208,6 +217,11 @@ echo "Internal IP = ${IP4}. External IPv6 prefix = ${IP6_PREFIX}"
 # Install 3proxy
 install_3proxy
 
+# Create primary ifconfig script
+gen_ifconfig $IPV6ADDR > $WORKDIR/boot_ifconfig.sh
+chmod +x $WORKDIR/boot_ifconfig.sh
+check_status "Failed to create primary ifconfig script"
+
 # Initialize proxy configurations
 PROXY_PORTS=()
 IP6_ADDRESSES=()
@@ -238,9 +252,10 @@ done
 cat > /etc/rc.local <<EOF
 #!/bin/bash
 touch /var/lock/subsys/local
+ulimit -n 1000048
+bash ${WORKDIR}/boot_ifconfig.sh
 $(for port in "${PROXY_PORTS[@]}"; do
     echo "bash ${WORKDIR}/boot_ifconfig_${port}.sh"
-    echo "ulimit -n 1000048"
     echo "/usr/local/etc/3proxy/bin/3proxy /usr/local/etc/3proxy/3proxy_${port}.cfg"
 done)
 EOF
@@ -271,8 +286,9 @@ def gen_ip6(prefix):
 # Clean old IPs
 def clean_old_ips():
     subprocess.run(["ip", "-6", "addr", "flush", "dev", "eth0", "scope", "global"])
-    with open(f"{WORKDIR}/boot_ifconfig.sh", "r") as f:
-        subprocess.run(f.read(), shell=True)
+    subprocess.run(["bash", f"{WORKDIR}/boot_ifconfig.sh"])
+    if subprocess.run(["ip", "-6", "addr", "show", "eth0"]).returncode != 0:
+        raise Exception("Failed to restore primary IPv6 address")
 
 # Update 3proxy configuration
 def update_3proxy(port, ip6):
