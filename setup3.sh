@@ -48,14 +48,22 @@ stacksize 6291456
 flush
 auth none
 allow *
-proxy -6 -n -a -p$PROXY_PORT -i$IP4 -e$CURRENT_IP6
+$(awk -F "/" '{print "proxy -6 -n -a -p" $1 " -i" $2 " -e" $3}' ${WORKDIR}/proxy_data.txt)
 flush
 EOF
 }
 
-# Generate ifconfig command for the current IPv6
+# Generate ifconfig commands for all IPv6 addresses
 gen_ifconfig() {
-    echo "ifconfig eth0 inet6 add $CURRENT_IP6/64"
+    awk -F "/" '{print "ifconfig eth0 inet6 add " $3 "/64"}' ${WORKDIR}/proxy_data.txt > $WORKDIR/boot_ifconfig.sh
+    chmod +x $WORKDIR/boot_ifconfig.sh
+}
+
+# Generate proxy data (port, IPv4, IPv6)
+gen_proxy_data() {
+    seq $FIRST_PORT $LAST_PORT | while read port; do
+        echo "$port/$IP4/$(gen64 $IP6_PREFIX)"
+    done > $WORKDIR/proxy_data.txt
 }
 
 # Install required packages
@@ -98,6 +106,22 @@ while :; do
     fi
 done
 
+# Input number of proxies
+FIRST_PORT=21000
+MAX_PORT=61000
+MAX_PROXIES=$((MAX_PORT - FIRST_PORT + 1))
+while :; do
+    read -p "Enter number of proxies to create (1-$MAX_PROXIES): " PROXY_COUNT
+    if [[ $PROXY_COUNT =~ ^[0-9]+$ ]] && [ $PROXY_COUNT -ge 1 ] && [ $PROXY_COUNT -le $MAX_PROXIES ]; then
+        echo "Will create $PROXY_COUNT proxies"
+        break
+    else
+        echo "Please enter a valid number between 1 and $MAX_PROXIES"
+    fi
+done
+LAST_PORT=$((FIRST_PORT + PROXY_COUNT - 1))
+echo "Creating proxies from port $FIRST_PORT to $LAST_PORT..."
+
 # Configure IPv6
 echo "Configuring IPv6..."
 cat << EOF >> /etc/sysconfig/network-scripts/ifcfg-eth0
@@ -128,7 +152,6 @@ fi
 install_3proxy
 
 # Set up working directory
-echo "Working directory = /home/cloudfly"
 WORKDIR="/home/cloudfly"
 mkdir -p $WORKDIR && cd $_
 echo "Created working directory $WORKDIR"
@@ -138,21 +161,14 @@ IP4=$(curl -4 -s icanhazip.com)
 IP6_PREFIX=$(curl -6 -s icanhazip.com | cut -f1-4 -d':')
 echo "Internal IP = ${IP4}. External IPv6 prefix = ${IP6_PREFIX}"
 
-# Set proxy port
-PROXY_PORT=21000
-CURRENT_IP6=$(gen64 $IP6_PREFIX)
-echo "Initial IPv6 for proxy: $CURRENT_IP6"
-
-# Generate initial configurations
-gen_ifconfig > $WORKDIR/boot_ifconfig.sh
-chmod +x $WORKDIR/boot_ifconfig.sh
-
-# Apply initial IPv6
-bash $WORKDIR/boot_ifconfig.sh
-echo "Applied initial IPv6 configuration"
-
-# Generate 3proxy configuration
+# Generate proxy data
+gen_proxy_data
+gen_ifconfig
 gen_3proxy > /usr/local/etc/3proxy/3proxy.cfg
+
+# Apply IPv6 configurations
+bash $WORKDIR/boot_ifconfig.sh
+echo "Applied IPv6 configurations"
 
 # Set up rc.local to start 3proxy
 cat >> /etc/rc.local <<EOF
@@ -174,10 +190,11 @@ import socketserver
 import subprocess
 import json
 import random
+import urllib.parse
 
 # Configuration
 WORKDIR = "/home/cloudfly"
-PROXY_PORT = 21000
+PROXY_DATA_FILE = f"{WORKDIR}/proxy_data.txt"
 IP6_PREFIX = subprocess.check_output("curl -6 -s icanhazip.com | cut -f1-4 -d':'", shell=True).decode().strip()
 IP4 = subprocess.check_output("curl -4 -s icanhazip.com", shell=True).decode().strip()
 
@@ -187,8 +204,32 @@ def gen_ip6(prefix):
     segments = [''.join(random.choice(hex_chars) for _ in range(4)) for _ in range(4)]
     return f"{prefix}:{':'.join(segments)}"
 
+# Update proxy data for a specific port or all
+def update_proxy_data(port=None):
+    proxies = []
+    with open(PROXY_DATA_FILE, "r") as f:
+        proxies = f.readlines()
+    
+    new_proxies = []
+    for proxy in proxies:
+        parts = proxy.strip().split("/")
+        current_port, ip4, _ = parts
+        if port is None or current_port == port:
+            new_ip6 = gen_ip6(IP6_PREFIX)
+            new_proxies.append(f"{current_port}/{ip4}/{new_ip6}")
+        else:
+            new_proxies.append(proxy.strip())
+    
+    with open(PROXY_DATA_FILE, "w") as f:
+        f.write("\n".join(new_proxies))
+    return [p.split("/")[2] for p in new_proxies if port is None or p.startswith(port)]
+
 # Update 3proxy configuration
-def update_3proxy(ip6):
+def update_3proxy():
+    proxies = []
+    with open(PROXY_DATA_FILE, "r") as f:
+        proxies = f.readlines()
+    
     with open("/usr/local/etc/3proxy/3proxy.cfg", "w") as f:
         f.write(f"""daemon
 maxconn 2000
@@ -204,14 +245,20 @@ stacksize 6291456
 flush
 auth none
 allow *
-proxy -6 -n -a -p{PROXY_PORT} -i{IP4} -e{ip6}
-flush
 """)
+        for proxy in proxies:
+            port, ip4, ip6 = proxy.strip().split("/")
+            f.write(f"proxy -6 -n -a -p{port} -i{ip4} -e{ip6}\n")
+        f.write("flush\n")
 
 # Update ifconfig script
-def update_ifconfig(ip6):
+def update_ifconfig():
     with open(f"{WORKDIR}/boot_ifconfig.sh", "w") as f:
-        f.write(f"ifconfig eth0 inet6 add {ip6}/64\n")
+        f.write("#!/bin/sh\n")
+        with open(PROXY_DATA_FILE, "r") as pf:
+            for line in pf:
+                ip6 = line.strip().split("/")[2]
+                f.write(f"ifconfig eth0 inet6 add {ip6}/64\n")
     subprocess.run(["chmod", "+x", f"{WORKDIR}/boot_ifconfig.sh"])
 
 # Restart 3proxy
@@ -223,14 +270,30 @@ def restart_3proxy():
 # HTTP handler
 class APIHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
-        if self.path == "/rest":
+        parsed_path = urllib.parse.urlparse(self.path)
+        if parsed_path.path == "/rest":
             try:
-                # Generate new IPv6
-                new_ip6 = gen_ip6(IP6_PREFIX)
+                query_params = urllib.parse.parse_qs(parsed_path.query)
+                port = query_params.get("port", [None])[0]
+                
+                if port:
+                    # Validate port
+                    with open(PROXY_DATA_FILE, "r") as f:
+                        ports = [line.split("/")[0] for line in f]
+                    if port not in ports:
+                        self.send_response(400)
+                        self.send_header("Content-type", "application/json")
+                        self.end_headers()
+                        response = {"status": "error", "message": f"Port {port} not found"}
+                        self.wfile.write(json.dumps(response).encode())
+                        return
+                
+                # Update proxy data
+                new_ips = update_proxy_data(port)
                 
                 # Update configurations
-                update_ifconfig(new_ip6)
-                update_3proxy(new_ip6)
+                update_ifconfig()
+                update_3proxy()
                 
                 # Restart proxy
                 restart_3proxy()
@@ -239,7 +302,7 @@ class APIHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_response(200)
                 self.send_header("Content-type", "application/json")
                 self.end_headers()
-                response = {"status": "success", "new_ip6": new_ip6}
+                response = {"status": "success", "updated_ips": new_ips}
                 self.wfile.write(json.dumps(response).encode())
             except Exception as e:
                 self.send_response(500)
@@ -265,5 +328,7 @@ chmod +x $WORKDIR/api_server.py
 nohup python3 $WORKDIR/api_server.py &
 
 echo "Proxy setup complete!"
-echo "Proxy running on ${IP4}:${PROXY_PORT} with IPv6 ${CURRENT_IP6}"
-echo "API server running on port 8080. Change IP by calling: curl http://${IP4}:8080/rest"
+echo "Created $PROXY_COUNT proxies from port $FIRST_PORT to $LAST_PORT"
+echo "API server running on port 8080."
+echo "Reset all proxies: curl http://${IP4}:8080/rest"
+echo "Reset specific proxy: curl http://${IP4}:8080/rest?port=<port>"
