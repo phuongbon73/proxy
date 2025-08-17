@@ -48,20 +48,27 @@ setgid 65535
 setuid 65535
 stacksize 6291456 
 flush
-auth strong
-
 users $(awk -F "/" 'BEGIN{ORS="";} {print $1 ":CL:" $2 " "}' ${WORKDATA})
 
-$(awk -F "/" '{print "auth strong\n" \
-"allow " $1 "\n" \
-"proxy -6 -n -a -p" $4 " -i" $3 " -e"$5"\n" \
-"flush\n"}' ${WORKDATA})
+$(if [ -n "$BYPASS_IP" ]; then
+    awk -F "/" '{print "auth strong\n" \
+    "allow " $1 "\n" \
+    "auth none\n" \
+    "allow " "'$BYPASS_IP'" "\n" \
+    "proxy -6 -n -a -p" $4 " -i" $3 " -e" $5 "\n" \
+    "flush\n"}' ${WORKDATA}
+else
+    awk -F "/" '{print "auth strong\n" \
+    "allow " $1 "\n" \
+    "proxy -6 -n -a -p" $4 " -i" $3 " -e" $5 "\n" \
+    "flush\n"}' ${WORKDATA}
+fi)
 EOF
 }
 
 gen_proxy_file_for_user() {
     cat >proxy.txt <<EOF
-$(awk -F "/" '{print $3 ":" $4 ":" $1 ":" $2 }' ${WORKDATA})
+$(awk -F "/" '{print $3 ":" $4 ":" $1 ":" $2}' ${WORKDATA})
 EOF
     echo "Đã tạo file proxy.txt với danh sách proxy"
 }
@@ -74,7 +81,7 @@ gen_data() {
 
 gen_iptables() {
     cat <<EOF
-    $(awk -F "/" '{print "iptables -I INPUT -p tcp --dport " $4 "  -m state --state NEW -j ACCEPT"}' ${WORKDATA}) 
+$(awk -F "/" '{print "iptables -I INPUT -p tcp --dport " $4 " -m state --state NEW -j ACCEPT"}' ${WORKDATA})
 EOF
 }
 
@@ -91,6 +98,7 @@ cat << EOF > /etc/rc.d/rc.local
 #!/bin/bash
 touch /var/lock/subsys/local
 EOF
+chmod 0755 /etc/rc.d/rc.local
 
 # Xóa buffer đầu vào trước khi yêu cầu nhập
 stty sane
@@ -177,6 +185,18 @@ while :; do
     fi
 done
 
+echo "Nhập địa chỉ IP để bỏ qua xác thực (ví dụ: 171.251.232.13). Nhấn Enter để bỏ qua:"
+read BYPASS_IP
+if [ -n "$BYPASS_IP" ]; then
+    if ! echo "$BYPASS_IP" | grep -E '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$' >/dev/null; then
+        echo "Địa chỉ IP không hợp lệ! Vui lòng nhập đúng định dạng IPv4 (ví dụ: 171.251.232.13)."
+        exit 1
+    fi
+    echo "Sẽ sử dụng auth none và allow $BYPASS_IP cho cấu hình proxy."
+else
+    echo "Không có IP được cung cấp. Sử dụng xác thực người dùng (auth strong)."
+fi
+
 LAST_PORT=$((FIRST_PORT + PROXY_COUNT - 1))
 echo "Bắt đầu từ port $FIRST_PORT đến $LAST_PORT. Tiếp tục..."
 
@@ -184,20 +204,20 @@ echo "Đang tạo dữ liệu proxy..."
 gen_data >$WORKDIR/data.txt
 gen_iptables >$WORKDIR/boot_iptables.sh
 gen_ifconfig >$WORKDIR/boot_ifconfig.sh
-chmod +x boot_*.sh /etc/rc.local
+chmod +x $WORKDIR/boot_*.sh /etc/rc.d/rc.local
 echo "Đã tạo file dữ liệu và script khởi động"
 
 echo "Đang tạo cấu hình 3proxy..."
 gen_3proxy >/usr/local/etc/3proxy/3proxy.cfg
 
-cat >>/etc/rc.local <<EOF
+cat >>/etc/rc.d/rc.local <<EOF
 bash ${WORKDIR}/boot_iptables.sh
 bash ${WORKDIR}/boot_ifconfig.sh
 ulimit -n 1000048
 /usr/local/etc/3proxy/bin/3proxy /usr/local/etc/3proxy/3proxy.cfg
 EOF
-chmod 0755 /etc/rc.local
-bash /etc/rc.local
+chmod 0755 /etc/rc.d/rc.local
+bash /etc/rc.d/rc.local
 echo "Đã cấu hình rc.local và khởi động proxy"
 
 gen_proxy_file_for_user
