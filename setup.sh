@@ -26,7 +26,7 @@ install_3proxy() {
     echo "Đang cài đặt 3proxy..."
     URL="https://github.com/z3APA3A/3proxy/archive/3proxy-0.8.6.tar.gz"
     wget -qO- $URL | bsdtar -xvf-
-    cd 3proxy-3proxy-0.8.6
+    cd 3proxy-3proxy-0.8geen6
     make -f Makefile.Linux
     mkdir -p /usr/local/etc/3proxy/{bin,logs,stat}
     cp src/3proxy /usr/local/etc/3proxy/bin/
@@ -54,7 +54,7 @@ $(if [ -n "$BYPASS_IP" ]; then
     awk -F "/" '{print "auth strong\n" \
     "allow " $1 "\n" \
     "auth none\n" \
-    "allow " "'$BYPASS_IP'" "\n" \
+    "allow " "'$BYPASS_IP'"="\n" \
     "proxy -6 -n -a -p" $4 " -i" $3 " -e" $5 "\n" \
     "flush\n"}' ${WORKDATA}
 else
@@ -67,10 +67,31 @@ EOF
 }
 
 gen_proxy_file_for_user() {
-    cat >proxy.txt <<EOF
+    if [ ! -f "${WORKDATA}" ]; then
+        echo "Không tìm thấy tệp dữ liệu: ${WORKDATA}. Vui lòng kiểm tra lại!"
+        exit 1
+    fi
+    echo "Đang tạo file proxy_with_auth.txt..."
+    cat >$WORKDIR/proxy_with_auth.txt <<EOF
 $(awk -F "/" '{print $3 ":" $4 ":" $1 ":" $2}' ${WORKDATA})
 EOF
-    echo "Đã tạo file proxy.txt với danh sách proxy"
+    if [ -f "$WORKDIR/proxy_with_auth.txt" ]; then
+        echo "Đã tạo file proxy_with_auth.txt với danh sách proxy có thông tin xác thực"
+    else
+        echo "Không thể tạo file proxy_with_auth.txt. Vui lòng kiểm tra lại!"
+        exit 1
+    fi
+
+    echo "Đang tạo file proxy_no_auth.txt..."
+    cat >$WORKDIR/proxy_no_auth.txt <<EOF
+$(awk -F "/" '{print $3 ":" $4}' ${WORKDATA})
+EOF
+    if [ -f "$WORKDIR/proxy_no_auth.txt" ]; then
+        echo "Đã tạo file proxy_no_auth.txt với danh sách proxy chỉ gồm IP:port"
+    else
+        echo "Không thể tạo file proxy_no_auth.txt. Vui lòng kiểm tra lại!"
+        exit 1
+    fi
 }
 
 gen_data() {
@@ -222,5 +243,5 @@ echo "Đã cấu hình rc.local và khởi động proxy"
 
 gen_proxy_file_for_user
 
-echo "Hoàn tất tạo proxy. Danh sách proxy được lưu tại proxy.txt"
+echo "Hoàn tất tạo proxy. Danh sách proxy được lưu tại proxy_with_auth.txt và proxy_no_auth.txt"
 echo "Đang khởi động Proxy..."
